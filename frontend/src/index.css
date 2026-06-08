@@ -1,0 +1,132 @@
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@400;500;600;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-0: #f8fbff;
+  --bg-1: #eef5ff;
+  --bg-2: #e9f2ff;
+  --line-soft: rgba(56, 78, 114, 0.16);
+  --line-strong: rgba(14, 165, 233, 0.35);
+  --text-0: #0f172a;
+  --text-1: #1e293b;
+  --text-2: #475569;
+  --panel-a: rgba(255, 255, 255, 0.78);
+  --panel-b: rgba(246, 251, 255, 0.92);
+  --panel-c: rgba(236, 245, 255, 0.86);
+  --accent-cyan: #2dd4bf;
+  --accent-blue: #38bdf8;
+  --accent-indigo: #818cf8;
+  color: var(--text-0);
+  font-family: "Space Grotesk", "Segoe UI", sans-serif;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--text-0);
+  background:
+    radial-gradient(1200px 800px at -10% -20%, rgba(45, 212, 191, 0.16), transparent 62%),
+    radial-gradient(900px 650px at 110% -10%, rgba(56, 189, 248, 0.14), transparent 58%),
+    linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 55%, var(--bg-2) 100%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+pre,
+code,
+.monaco-editor,
+.monaco-editor .view-lines {
+  font-family: "JetBrains Mono", "SFMono-Regular", Menlo, monospace !important;
+}
+
+.app-shell {
+  position: relative;
+  overflow-x: hidden;
+}
+
+.app-shell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(to right, rgba(59, 130, 246, 0.08) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(59, 130, 246, 0.08) 1px, transparent 1px);
+  background-size: 28px 28px;
+  mask-image: radial-gradient(circle at center, black 40%, transparent 100%);
+  pointer-events: none;
+}
+
+.neo-panel {
+  border: 1px solid var(--line-soft);
+  background:
+    linear-gradient(140deg, rgba(219, 234, 254, 0.32), rgba(226, 232, 240, 0.18)),
+    linear-gradient(170deg, var(--panel-a), var(--panel-b));
+  box-shadow:
+    0 24px 70px -38px rgba(30, 64, 175, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(18px);
+}
+
+.neo-subpanel {
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  background: linear-gradient(165deg, rgba(255, 255, 255, 0.86), rgba(239, 246, 255, 0.9));
+}
+
+.neon-btn {
+  border: 1px solid rgba(14, 165, 233, 0.55);
+  background: linear-gradient(140deg, rgba(14, 165, 233, 0.92), rgba(59, 130, 246, 0.92));
+  color: #ecfeff;
+  box-shadow:
+    0 16px 38px -18px rgba(14, 165, 233, 0.52),
+    inset 0 1px 0 rgba(255, 255, 255, 0.32);
+  transition: transform 180ms ease, box-shadow 180ms ease, filter 180ms ease;
+}
+
+.neon-btn:hover {
+  transform: translateY(-1px);
+  filter: saturate(1.1);
+  box-shadow:
+    0 14px 34px -14px rgba(56, 189, 248, 0.92),
+    inset 0 1px 0 rgba(224, 242, 254, 0.3);
+}
+
+.neon-btn:disabled {
+  opacity: 0.55;
+  transform: none;
+  box-shadow: none;
+}
+
+.reveal {
+  animation: reveal-up 420ms ease both;
+}
+
+.stagger-1 { animation-delay: 40ms; }
+.stagger-2 { animation-delay: 90ms; }
+.stagger-3 { animation-delay: 140ms; }
+.stagger-4 { animation-delay: 180ms; }
+
+@keyframes reveal-up {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 16px, 0) scale(0.992);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    animation: none;
+  }
+}

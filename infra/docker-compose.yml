@@ -1,0 +1,67 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:15
+    container_name: code-analysis-db
+    environment:
+      POSTGRES_USER: sonar
+      POSTGRES_PASSWORD: sonar
+      POSTGRES_DB: sonarqube
+    volumes:
+      - sonar_db:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  sonarqube:
+    image: sonarqube:community
+    container_name: code-analysis-sq
+    depends_on:
+      - db
+    ports:
+      - "9000:9000"
+    environment:
+      SONAR_JDBC_URL: jdbc:postgresql://db:5432/sonarqube
+      SONAR_JDBC_USERNAME: sonar
+      SONAR_JDBC_PASSWORD: sonar
+    volumes:
+      - sonar_data:/opt/sonarqube/data
+      - sonar_extensions:/opt/sonarqube/extensions
+      - sonar_logs:/opt/sonarqube/logs
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: code-analysis-backend
+    depends_on:
+      - sonarqube
+    env_file:
+      - .env
+    environment:
+      PORT: 3001
+      SONAR_HOST_URL: http://sonarqube:9000
+      SONAR_SCANNER_BIN: /opt/sonar-scanner/bin/sonar-scanner
+      SONAR_SOURCES: .
+      SONAR_INCLUSIONS: ""
+      SONAR_EXCLUSIONS: "**/node_modules/**,**/.git/**,**/dist/**,**/build/**,**/coverage/**,**/.next/**,**/.nuxt/**,**/.venv/**,**/venv/**,**/target/**,**/vendor/**,**/*.min.js,**/*.map,**/*.lock"
+    ports:
+      - "3001:3001"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: code-analysis-frontend
+    depends_on:
+      - backend
+    ports:
+      - "5173:80"
+    restart: unless-stopped
+
+volumes:
+  sonar_db:
+  sonar_data:
+  sonar_extensions:
+  sonar_logs:
