@@ -1,4 +1,4 @@
-# SonarQube + LLM Code Review Platform
+# SonarQube + LLM Python Code Review Platform
 
 基于 `React + Tailwind + Monaco Editor` 与 `Node.js` 的代码审查平台，实现 ZIP 上传、Sonar 参数化扫描、主要缺陷提取、LLM 修复建议与本地临时源码清理。
 
