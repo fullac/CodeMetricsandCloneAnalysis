@@ -1,0 +1,60 @@
+import type { StaticAnalysisRule } from "../../types/index.js";
+
+export const javaRules: StaticAnalysisRule[] = [
+  {
+    id: "java-empty-catch",
+    severity: "MAJOR",
+    type: "BUG",
+    language: "java",
+    description: "empty catch block",
+    matcher: "ast-walk",
+  },
+  {
+    id: "java-hardcoded-cred",
+    severity: "CRITICAL",
+    type: "VULNERABILITY",
+    language: "java",
+    description: "hardcoded credential-like string",
+    matcher: "ast-walk",
+  },
+  {
+    id: "java-switch-no-default",
+    severity: "MAJOR",
+    type: "BUG",
+    language: "java",
+    description: "switch without default branch",
+    matcher: "ast-walk",
+  },
+  {
+    id: "java-long-method",
+    severity: "MINOR",
+    type: "CODE_SMELL",
+    language: "java",
+    description: "method longer than 100 lines",
+    matcher: "ast-walk",
+  },
+  {
+    id: "java-too-many-params",
+    severity: "MINOR",
+    type: "CODE_SMELL",
+    language: "java",
+    description: "method with more than 6 parameters",
+    matcher: "ast-walk",
+  },
+  {
+    id: "java-deep-nesting",
+    severity: "MINOR",
+    type: "CODE_SMELL",
+    language: "java",
+    description: "method nesting deeper than 4 levels",
+    matcher: "ast-walk",
+  },
+  {
+    id: "java-resource-leak",
+    severity: "MAJOR",
+    type: "BUG",
+    language: "java",
+    description: "FileInputStream or Reader allocation without close",
+    matcher: "ast-walk",
+  },
+];

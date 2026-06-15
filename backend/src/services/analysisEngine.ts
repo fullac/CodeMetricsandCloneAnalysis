@@ -1,0 +1,104 @@
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import AdmZip from "adm-zip";
+import { analyzeSourceTree } from "./analysis/analyzer.js";
+import { isSupportedSourceFilename } from "./analysis/language.js";
+import type {
+  StaticAnalysisLanguage,
+  StaticAnalysisScanOptions,
+  StaticAnalysisScanReport,
+} from "../types/index.js";
+
+const DEFAULT_SCAN_OPTIONS: StaticAnalysisScanOptions = {
+  engines: {
+    rules: false,
+    cloneDetection: true,
+  },
+  languages: ["python", "java", "c", "cpp"],
+  cloneThreshold: 0.0,
+};
+
+export function normalizeScanOptions(input: unknown): StaticAnalysisScanOptions {
+  const raw = input && typeof input === "object" ? input as Partial<StaticAnalysisScanOptions> : {};
+  const engines = raw.engines && typeof raw.engines === "object" ? raw.engines : DEFAULT_SCAN_OPTIONS.engines;
+  const languages = Array.isArray(raw.languages)
+    ? raw.languages.filter((item): item is StaticAnalysisLanguage => item === "python" || item === "java" || item === "c" || item === "cpp")
+    : DEFAULT_SCAN_OPTIONS.languages;
+  const cloneThreshold = typeof raw.cloneThreshold === "number" && Number.isFinite(raw.cloneThreshold)
+    ? Math.min(1, Math.max(0, raw.cloneThreshold))
+    : DEFAULT_SCAN_OPTIONS.cloneThreshold;
+
+  return {
+    engines: {
+      rules: engines.rules ?? DEFAULT_SCAN_OPTIONS.engines.rules,
+      cloneDetection: engines.cloneDetection ?? DEFAULT_SCAN_OPTIONS.engines.cloneDetection,
+    },
+    languages: languages.length ? languages : DEFAULT_SCAN_OPTIONS.languages,
+    cloneThreshold,
+  };
+}
+
+export function parseScanOptionsJson(value: unknown): StaticAnalysisScanOptions {
+  if (value === undefined || value === null || value === "") {
+    return DEFAULT_SCAN_OPTIONS;
+  }
+
+  if (typeof value !== "string") {
+    return normalizeScanOptions(value);
+  }
+
+  try {
+    return normalizeScanOptions(JSON.parse(value));
+  } catch {
+    throw new Error("scanOptions must be valid JSON.");
+  }
+}
+
+export function isSupportedAnalysisUpload(filename: string, mimetype: string): boolean {
+  const lower = filename.toLowerCase();
+  return mimetype === "application/zip"
+    || lower.endsWith(".zip")
+    || isSupportedSourceFilename(lower);
+}
+
+async function prepareInput(filePath: string, originalName: string): Promise<{ rootDir: string; cleanupDir: string }> {
+  const cleanupDir = await fs.mkdtemp(path.join(os.tmpdir(), `analysis-${Date.now()}-`));
+  const rootDir = path.join(cleanupDir, "source");
+  await fs.mkdir(rootDir, { recursive: true });
+
+  if (originalName.toLowerCase().endsWith(".zip")) {
+    const zip = new AdmZip(filePath);
+    zip.extractAllTo(rootDir, true);
+  } else {
+    await fs.copyFile(filePath, path.join(rootDir, path.basename(originalName)));
+  }
+
+  return { rootDir, cleanupDir };
+}
+
+export async function analyzeProject(input: {
+  filePath: string;
+  originalName: string;
+  projectKey: string;
+  options?: StaticAnalysisScanOptions;
+}): Promise<StaticAnalysisScanReport> {
+  const startedAt = Date.now();
+  let cleanupDir = "";
+
+  try {
+    const prepared = await prepareInput(input.filePath, input.originalName);
+    cleanupDir = prepared.cleanupDir;
+    return await analyzeSourceTree({
+      rootDir: prepared.rootDir,
+      projectKey: input.projectKey,
+      options: input.options ?? DEFAULT_SCAN_OPTIONS,
+      startedAt,
+    });
+  } finally {
+    if (cleanupDir) {
+      await fs.rm(cleanupDir, { recursive: true, force: true });
+    }
+    await fs.rm(input.filePath, { force: true });
+  }
+}
