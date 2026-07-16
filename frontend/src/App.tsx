@@ -1,293 +1,308 @@
 import { useMemo, useState } from "react";
 import axios from "axios";
 import UploadPanel from "./components/UploadPanel";
-import IssueViewer from "./components/IssueViewer";
-import IssueDiagnosisModal from "./components/IssueDiagnosisModal";
-import MetricsRadar from "./components/MetricsRadar";
-import type { IssueDiagnosisResult, ProjectDiagnosisResult, ReviewIssue, ReviewResult } from "./types";
+import type { StaticAnalysisFileMetrics, StaticAnalysisFunctionMetric, StaticAnalysisScanReport } from "./types";
 
-function toDiagnosisMap(results: IssueDiagnosisResult[]): Record<string, IssueDiagnosisResult> {
-  const updates: Record<string, IssueDiagnosisResult> = {};
-  results.forEach((item) => {
-    updates[item.issueKey] = item;
+type FunctionRow = StaticAnalysisFunctionMetric & {
+  file: string;
+  language: string;
+};
+
+const PAGE_SIZE = 10;
+
+function formatNumber(value: number, digits = 0): string {
+  return value.toLocaleString(undefined, {
+    maximumFractionDigits: digits,
+    minimumFractionDigits: digits,
   });
-  return updates;
 }
 
-function diagnosisSummary(result?: ProjectDiagnosisResult): string {
-  if (!result) return "尚未触发项目LLM评估";
-  return result.diagnosis;
+function formatPercent(value: number): string {
+  return `${formatNumber(value * 100, 1)}%`;
+}
+
+function fileMaxComplexity(file: StaticAnalysisFileMetrics): number {
+  return file.functions.reduce((max, item) => Math.max(max, item.complexity), 0);
+}
+
+function getPageCount(total: number): number {
+  return Math.max(1, Math.ceil(total / PAGE_SIZE));
+}
+
+function getPageItems<T>(items: T[], page: number): T[] {
+  const start = (page - 1) * PAGE_SIZE;
+  return items.slice(start, start + PAGE_SIZE);
+}
+
+async function extractErrorMessage(err: any, fallback: string): Promise<string> {
+  const data = err?.response?.data;
+  if (data instanceof Blob) {
+    const text = await data.text();
+    try {
+      return JSON.parse(text).error ?? fallback;
+    } catch {
+      return text || fallback;
+    }
+  }
+  return data?.error ?? err.message ?? fallback;
+}
+
+function MetricTile({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <article className="metric-card">
+      <div className="metric-label">{label}</div>
+      <div className="metric-value">{value}</div>
+      {sub && <div className="metric-sub">{sub}</div>}
+    </article>
+  );
+}
+
+function Pagination({
+  page,
+  total,
+  onPageChange,
+}: {
+  page: number;
+  total: number;
+  onPageChange: (page: number) => void;
+}) {
+  const pageCount = getPageCount(total);
+  const start = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const end = Math.min(page * PAGE_SIZE, total);
+
+  if (total <= PAGE_SIZE) {
+    return null;
+  }
+
+  return (
+    <div className="pagination">
+      <span>{formatNumber(start)}-{formatNumber(end)} / {formatNumber(total)}</span>
+      <div className="pagination-actions">
+        <button type="button" onClick={() => onPageChange(Math.max(1, page - 1))} disabled={page === 1}>
+          上一页
+        </button>
+        <span>{formatNumber(page)} / {formatNumber(pageCount)}</span>
+        <button type="button" onClick={() => onPageChange(Math.min(pageCount, page + 1))} disabled={page === pageCount}>
+          下一页
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export default function App() {
-  const [result, setResult] = useState<ReviewResult | null>(null);
+  const [result, setResult] = useState<StaticAnalysisScanReport | null>(null);
   const [error, setError] = useState("");
-  const [projectDiagnosis, setProjectDiagnosis] = useState<ProjectDiagnosisResult | null>(null);
-  const [selectedIssueKeys, setSelectedIssueKeys] = useState<string[]>([]);
-  const [selectedHotspotKeys, setSelectedHotspotKeys] = useState<string[]>([]);
-  const [issueDiagnoses, setIssueDiagnoses] = useState<Record<string, IssueDiagnosisResult>>({});
-  const [hotspotDiagnoses, setHotspotDiagnoses] = useState<Record<string, IssueDiagnosisResult>>({});
-  const [issueDiagnosisModalOpen, setIssueDiagnosisModalOpen] = useState(false);
-  const [hotspotDiagnosisModalOpen, setHotspotDiagnosisModalOpen] = useState(false);
-  const [diagLoading, setDiagLoading] = useState(false);
-  const [issueDiagLoading, setIssueDiagLoading] = useState(false);
-  const [hotspotDiagLoading, setHotspotDiagLoading] = useState(false);
-  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [filePage, setFilePage] = useState(1);
+  const [functionPage, setFunctionPage] = useState(1);
+  const [clonePage, setClonePage] = useState(1);
+  const [pdfLoading, setPdfLoading] = useState(false);
 
-  const issueMap = useMemo(() => {
-    const map = new Map<string, ReviewIssue>();
-    (result?.issues ?? []).forEach((issue) => map.set(issue.key, issue));
-    return map;
-  }, [result?.issues]);
+  const functionRows = useMemo<FunctionRow[]>(() => {
+    return (result?.fileMetrics ?? []).flatMap((file) =>
+      file.functions.map((fn) => ({
+        ...fn,
+        file: file.file,
+        language: file.language,
+      }))
+    );
+  }, [result?.fileMetrics]);
+  const fileRows = result?.fileMetrics ?? [];
+  const cloneRows = result?.clonePairs ?? [];
+  const visibleFileRows = getPageItems(fileRows, filePage);
+  const visibleFunctionRows = getPageItems(functionRows, functionPage);
+  const visibleCloneRows = getPageItems(cloneRows, clonePage);
 
-  const hotspotMap = useMemo(() => {
-    const map = new Map<string, ReviewIssue>();
-    (result?.securityHotspots ?? []).forEach((issue) => map.set(issue.key, issue));
-    return map;
-  }, [result?.securityHotspots]);
-
-  const issues = result?.issues ?? [];
-  const hotspots = result?.securityHotspots ?? [];
-
-  const selectedIssues = useMemo(
-    () => selectedIssueKeys.map((k) => issueMap.get(k)).filter(Boolean) as ReviewIssue[],
-    [selectedIssueKeys, issueMap]
-  );
-
-  const selectedHotspots = useMemo(
-    () => selectedHotspotKeys.map((k) => hotspotMap.get(k)).filter(Boolean) as ReviewIssue[],
-    [selectedHotspotKeys, hotspotMap]
-  );
-
-  const runProjectDiagnosis = async () => {
-    if (!result) return;
-    setDiagLoading(true);
-    setError("");
-    try {
-      const resp = await axios.post<ProjectDiagnosisResult>("/api/diagnose/project", {
-        metrics: result.metrics,
-      });
-      setProjectDiagnosis(resp.data);
-    } catch (err: any) {
-      setError(err?.response?.data?.error ?? err.message ?? "项目诊断失败");
-    } finally {
-      setDiagLoading(false);
-    }
-  };
-
-  const runIssueDiagnosis = async () => {
-    if (!selectedIssues.length) {
-      setError("请先选择至少一条 High issue");
+  const downloadPdf = async () => {
+    if (!result || pdfLoading) {
       return;
     }
-    setIssueDiagLoading(true);
-    setError("");
-    try {
-      const resp = await axios.post<{ results: IssueDiagnosisResult[] }>("/api/diagnose/issues", {
-        issues: selectedIssues,
-      });
-      setIssueDiagnoses((prev) => ({ ...prev, ...toDiagnosisMap(resp.data.results) }));
-      setIssueDiagnosisModalOpen(false);
-    } catch (err: any) {
-      setError(err?.response?.data?.error ?? err.message ?? "Issue诊断失败");
-    } finally {
-      setIssueDiagLoading(false);
-    }
-  };
 
-  const runHotspotDiagnosis = async () => {
-    if (!selectedHotspots.length) {
-      setError("请先选择至少一条 Security Hotspot");
-      return;
-    }
-    setHotspotDiagLoading(true);
+    setPdfLoading(true);
     setError("");
-    try {
-      const resp = await axios.post<{ results: IssueDiagnosisResult[] }>("/api/diagnose/hotspots", {
-        issues: selectedHotspots,
-      });
-      setHotspotDiagnoses((prev) => ({ ...prev, ...toDiagnosisMap(resp.data.results) }));
-      setHotspotDiagnosisModalOpen(false);
-    } catch (err: any) {
-      setError(err?.response?.data?.error ?? err.message ?? "Hotspot诊断失败");
-    } finally {
-      setHotspotDiagLoading(false);
-    }
-  };
 
-  const deleteCurrentRecord = async () => {
-    if (!result) return;
-    setDeleteLoading(true);
-    setError("");
     try {
-      await axios.post("/api/review/delete", {
-        projectKey: result.projectKey,
+      const response = await axios.post<Blob>("/api/report/pdf", result, {
+        responseType: "blob",
       });
-      setResult(null);
-      setProjectDiagnosis(null);
-      setIssueDiagnoses({});
-      setHotspotDiagnoses({});
-      setSelectedIssueKeys([]);
-      setSelectedHotspotKeys([]);
-      setIssueDiagnosisModalOpen(false);
-      setHotspotDiagnosisModalOpen(false);
+      const url = URL.createObjectURL(response.data);
+      const link = document.createElement("a");
+      const filename = `${result.projectKey.trim().replace(/[^\w.-]+/g, "-") || "analysis-report"}.pdf`;
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (err: any) {
-      setError(err?.response?.data?.error ?? err.message ?? "删除记录失败");
+      setError(await extractErrorMessage(err, "PDF 导出失败"));
     } finally {
-      setDeleteLoading(false);
+      setPdfLoading(false);
     }
   };
 
   return (
-    <main className="app-shell min-h-screen px-4 py-8 pb-24 lg:px-8">
-      <div className="mx-auto flex max-w-7xl flex-col gap-6">
-        <header className="neo-panel reveal rounded-3xl p-6 stagger-1">
-          <div className="inline-flex rounded-full border border-cyan-400/45 bg-cyan-100/75 px-3 py-1 text-xs font-medium tracking-[0.08em] text-cyan-800">
-            SonarQube + LLM Review
+    <main className="app-shell">
+      <div className="content-frame">
+        <header className="surface-panel hero-panel reveal">
+          <div>
+            <div className="eyebrow">Code Metrics Analysis & Clone Recognition</div>
+            <h1>多语言代码分析与克隆检测平台</h1>
           </div>
-          <h1 className="mt-3 bg-gradient-to-r from-cyan-700 via-sky-700 to-indigo-700 bg-clip-text text-3xl font-bold tracking-tight text-transparent">
-            SonarQube + LLM 代码审查平台
-          </h1>
-          <p className="mt-2 max-w-3xl text-sm text-slate-600"></p>
+          <div className="hero-stats" aria-label="analysis capabilities">
+            <span>AST  </span>
+            <span>Metrics</span>
+            <span>Clone</span>
+          </div>
         </header>
 
         <UploadPanel
           onDone={(data) => {
             setResult(data);
             setError("");
-            setProjectDiagnosis(null);
-            setIssueDiagnoses({});
-            setHotspotDiagnoses({});
-            setSelectedIssueKeys([]);
-            setSelectedHotspotKeys([]);
-            setIssueDiagnosisModalOpen(false);
-            setHotspotDiagnosisModalOpen(false);
+            setFilePage(1);
+            setFunctionPage(1);
+            setClonePage(1);
           }}
           setError={setError}
+          canExportPdf={!!result}
+          pdfLoading={pdfLoading}
+          onExportPdf={downloadPdf}
         />
 
-        {error && <div className="reveal rounded-2xl border border-rose-300/65 bg-rose-50 p-4 text-sm text-rose-700 shadow-[0_12px_34px_-24px_rgba(244,63,94,0.45)]">{error}</div>}
+        {error && <div className="error-panel reveal">{error}</div>}
 
         {result && (
-          <section className="reveal grid gap-6 lg:grid-cols-[1.08fr_0.92fr] stagger-2">
-            <div className="neo-panel space-y-4 rounded-3xl p-5">
-              <h2 className="text-lg font-semibold text-slate-900">静态解析概览</h2>
-              <p className="text-sm text-slate-700">项目：{result.projectKey}</p>
-              <p className="text-sm text-slate-700">扫描时间：{new Date(result.scannedAt).toLocaleString()}</p>
-              <p className="text-sm text-slate-700">High Issue：{issues.length}</p>
-              <p className="text-sm text-slate-700">Security Hotspots：{hotspots.length}</p>
-              <button
-                onClick={deleteCurrentRecord}
-                disabled={deleteLoading}
-                className="rounded-xl border border-rose-300/60 bg-gradient-to-r from-rose-500 to-rose-600 px-4 py-2 text-sm font-medium text-white shadow-[0_10px_30px_-18px_rgba(244,63,94,0.58)] transition hover:saturate-125 disabled:opacity-60"
-              >
-                {deleteLoading ? "删除中..." : "删除此次解析记录"}
-              </button>
-            </div>
+          <>
+            <section className="metrics-grid reveal">
+              <MetricTile label="项目" value={result.projectKey} sub={new Date(result.scannedAt).toLocaleString()} />
+              <MetricTile label="文件数" value={formatNumber(result.fileMetrics.length)} sub={`${formatNumber(result.durationMs)} ms`} />
+              <MetricTile label="代码行" value={formatNumber(result.metrics.ncloc)} sub={`总行数 ${formatNumber(result.metrics.totalLines)}`} />
+              <MetricTile label="注释密度" value={formatPercent(result.metrics.commentDensity)} sub="AST comment nodes" />
+              <MetricTile label="函数数" value={formatNumber(result.metrics.functionCount)} sub={`类/结构 ${formatNumber(result.metrics.classCount)}`} />
+              <MetricTile label="平均复杂度" value={formatNumber(result.metrics.avgComplexity, 1)} sub={`最大 ${formatNumber(result.metrics.maxComplexity)}`} />
+              <MetricTile label="超长函数" value={formatNumber(result.metrics.overLongFunctions)} sub="> 100 lines" />
+              <MetricTile label="克隆率" value={formatPercent(result.metrics.cloneRate)} sub={`${formatNumber(result.clonePairs.length)} clone pairs`} />
+            </section>
 
-            <MetricsRadar metrics={result.metrics} />
-          </section>
-        )}
+            <section className="surface-panel data-section reveal">
+              <div className="section-heading">
+                <h2>文件级指标</h2>
+                <span className="count-badge">{formatNumber(result.fileMetrics.length)} files</span>
+              </div>
 
-        <IssueViewer
-          title="High Issue 列表"
-          issues={issues}
-          issueDiagnoses={issueDiagnoses}
-          headerAction={
-            <button
-              onClick={() => setIssueDiagnosisModalOpen(true)}
-              disabled={issueDiagLoading || issues.length === 0}
-              className="neon-btn rounded-xl px-4 py-2 text-sm font-medium disabled:opacity-60"
-            >
-              {issueDiagLoading ? "Issue诊断中..." : `选择并诊断 High Issue (${selectedIssueKeys.length})`}
-            </button>
-          }
-        />
+              <div className="table-wrap">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>File</th>
+                      <th>Lang</th>
+                      <th className="numeric">NCloc</th>
+                      <th className="numeric">Lines</th>
+                      <th className="numeric">Comments</th>
+                      <th className="numeric">Functions</th>
+                      <th className="numeric">Classes</th>
+                      <th className="numeric">Imports</th>
+                      <th className="numeric">Max Cx</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleFileRows.map((file) => (
+                      <tr key={file.file}>
+                        <td className="code-cell">{file.file}</td>
+                        <td>{file.language}</td>
+                        <td className="numeric">{formatNumber(file.ncloc)}</td>
+                        <td className="numeric">{formatNumber(file.totalLines)}</td>
+                        <td className="numeric">{formatNumber(file.commentLines)}</td>
+                        <td className="numeric">{formatNumber(file.functionCount)}</td>
+                        <td className="numeric">{formatNumber(file.classCount)}</td>
+                        <td className="numeric">{formatNumber(file.importCount)}</td>
+                        <td className="numeric">{formatNumber(fileMaxComplexity(file))}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <Pagination page={filePage} total={fileRows.length} onPageChange={setFilePage} />
+            </section>
 
-        <IssueDiagnosisModal
-          open={issueDiagnosisModalOpen}
-          title="选择需要诊断的Issue"
-          subtitle="所选问题将使用LLM进行评估和诊断"
-          itemLabel="Issue"
-          issues={issues}
-          selectedIssueKeys={selectedIssueKeys}
-          loading={issueDiagLoading}
-          onToggleIssue={(issueKey, checked) => {
-            setSelectedIssueKeys((prev) => {
-              if (checked) return Array.from(new Set([...prev, issueKey]));
-              return prev.filter((k) => k !== issueKey);
-            });
-          }}
-          onToggleAll={(checked) => {
-            setSelectedIssueKeys(checked ? issues.map((item) => item.key) : []);
-          }}
-          onConfirm={runIssueDiagnosis}
-          onClose={() => setIssueDiagnosisModalOpen(false)}
-        />
+            <section className="surface-panel data-section reveal">
+              <div className="section-heading">
+                <h2>函数级指标</h2>
+                <span className="count-badge">{formatNumber(functionRows.length)} functions</span>
+              </div>
 
-        <IssueViewer
-          title="Security Hotspots 列表"
-          issues={hotspots}
-          issueDiagnoses={hotspotDiagnoses}
-          headerAction={
-            <button
-              onClick={() => setHotspotDiagnosisModalOpen(true)}
-              disabled={hotspotDiagLoading || hotspots.length === 0}
-              className="rounded-xl border border-indigo-300/55 bg-gradient-to-r from-indigo-500 to-sky-500 px-4 py-2 text-sm font-medium text-white shadow-[0_12px_28px_-16px_rgba(99,102,241,0.55)] transition hover:saturate-125 disabled:opacity-60"
-            >
-              {hotspotDiagLoading ? "Hotspot诊断中..." : `选择并诊断 Hotspot (${selectedHotspotKeys.length})`}
-            </button>
-          }
-        />
-
-        <IssueDiagnosisModal
-          open={hotspotDiagnosisModalOpen}
-          title="选择需要诊断的安全热点"
-          subtitle="所选热点将使用LLM进行评估和诊断"
-          itemLabel="Hotspot"
-          issues={hotspots}
-          selectedIssueKeys={selectedHotspotKeys}
-          loading={hotspotDiagLoading}
-          onToggleIssue={(issueKey, checked) => {
-            setSelectedHotspotKeys((prev) => {
-              if (checked) return Array.from(new Set([...prev, issueKey]));
-              return prev.filter((k) => k !== issueKey);
-            });
-          }}
-          onToggleAll={(checked) => {
-            setSelectedHotspotKeys(checked ? hotspots.map((item) => item.key) : []);
-          }}
-          onConfirm={runHotspotDiagnosis}
-          onClose={() => setHotspotDiagnosisModalOpen(false)}
-        />
-
-        {result && (
-          <section className="neo-panel reveal rounded-3xl p-5 stagger-4">
-            <h2 className="mb-3 text-lg font-semibold text-slate-900">项目整体评估</h2>
-            <div className="flex flex-wrap items-center gap-3">
-              <button
-                onClick={runProjectDiagnosis}
-                disabled={diagLoading}
-                className="neon-btn rounded-xl px-4 py-2 text-sm font-medium disabled:opacity-60"
-              >
-                {diagLoading ? "LLM评估中..." : "触发项目LLM评估"}
-              </button>
-            </div>
-
-            <div className="neo-subpanel mt-4 rounded-2xl p-4 text-sm whitespace-pre-wrap text-slate-800">
-              {projectDiagnosis ? (
-                <div className="space-y-2">
-                  <div className="text-xs text-slate-500">{projectDiagnosis.startedAt} · {projectDiagnosis.durationMs}ms</div>
-                  <div>{diagnosisSummary(projectDiagnosis)}</div>
-                </div>
+              {functionRows.length === 0 ? (
+                <div className="empty-panel">未识别到函数定义</div>
               ) : (
-                "尚未触发项目LLM评估"
+                <div className="table-wrap">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Function</th>
+                        <th>File</th>
+                        <th>Lang</th>
+                        <th className="numeric">Lines</th>
+                        <th className="numeric">Complexity</th>
+                        <th className="numeric">Nesting</th>
+                        <th className="numeric">Params</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {visibleFunctionRows.map((fn) => (
+                        <tr key={`${fn.file}:${fn.startLine}:${fn.name}`}>
+                          <td className="strong-cell">{fn.name}</td>
+                          <td className="code-cell">{fn.file}:{fn.startLine}</td>
+                          <td>{fn.language}</td>
+                          <td className="numeric">{formatNumber(fn.lines)}</td>
+                          <td className="numeric">{formatNumber(fn.complexity)}</td>
+                          <td className="numeric">{formatNumber(fn.nestingDepth)}</td>
+                          <td className="numeric">{formatNumber(fn.paramCount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
-            </div>
-          </section>
-        )}
+              <Pagination page={functionPage} total={functionRows.length} onPageChange={setFunctionPage} />
+            </section>
 
-        <div className="h-16" />
+            <section className="surface-panel data-section reveal">
+              <div className="section-heading">
+                <h2>克隆检测</h2>
+                <span className="count-badge">{formatNumber(result.clonePairs.length)} pairs</span>
+              </div>
+
+              {result.clonePairs.length === 0 ? (
+                <div className="empty-panel">未检测到超过阈值的克隆文件对</div>
+              ) : (
+                <div className="table-wrap">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>File A</th>
+                        <th>File B</th>
+                        <th className="numeric">Similarity</th>
+                        <th className="numeric">Matching K-Grams</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {visibleCloneRows.map((pair) => (
+                        <tr key={`${pair.fileA}:${pair.fileB}`}>
+                          <td className="code-cell">{pair.fileA}</td>
+                          <td className="code-cell">{pair.fileB}</td>
+                          <td className="numeric">{formatPercent(pair.jaccardSimilarity)}</td>
+                          <td className="numeric">{formatNumber(pair.matchingKGrams)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <Pagination page={clonePage} total={cloneRows.length} onPageChange={setClonePage} />
+            </section>
+          </>
+        )}
       </div>
     </main>
   );
