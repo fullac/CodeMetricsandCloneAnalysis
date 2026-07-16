@@ -117,14 +117,3 @@ npm run dev
 
 返回：项目扫描时间、主要缺陷列表、代码片段与 LLM 建议。
 
-## 汇报文档
-- 详见 `docs/system-architecture.md`
-- 重点：
-  - 大模型上下文精简（只传 line ±10）
-  - Sonar 历史数据留存（不删除 Sonar 项目）
-
-## Docker 文件
-- `infra/docker-compose.yml`：统一编排四个服务
-- `infra/.env.example`：容器运行参数模板
-- `backend/Dockerfile`：包含 Java + sonar-scanner 的后端镜像
-- `frontend/Dockerfile` + `frontend/nginx.conf`：前端静态托管并反向代理 `/api`
