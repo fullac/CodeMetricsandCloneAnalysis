@@ -7,3 +7,4 @@ dist/
 .sonar/
 backend/data/
 .doc/
+proj_details.md
