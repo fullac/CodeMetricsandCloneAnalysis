@@ -56,7 +56,7 @@ export function detectClonePairs(input: {
   threshold: number;
   maxPairs?: number;
 }): StaticAnalysisClonePair[] {
-  const maxPairs = input.maxPairs ?? 50;
+  const maxPairs = input.maxPairs ?? 5;
   const candidates = createCandidates(input.fingerprints);
   const clonePairs: StaticAnalysisClonePair[] = [];
 

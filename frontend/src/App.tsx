@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import axios from "axios";
 import UploadPanel from "./components/UploadPanel";
 import type { StaticAnalysisFileMetrics, StaticAnalysisFunctionMetric, StaticAnalysisScanReport } from "./types";
 
@@ -6,6 +7,8 @@ type FunctionRow = StaticAnalysisFunctionMetric & {
   file: string;
   language: string;
 };
+
+const PAGE_SIZE = 10;
 
 function formatNumber(value: number, digits = 0): string {
   return value.toLocaleString(undefined, {
@@ -22,6 +25,28 @@ function fileMaxComplexity(file: StaticAnalysisFileMetrics): number {
   return file.functions.reduce((max, item) => Math.max(max, item.complexity), 0);
 }
 
+function getPageCount(total: number): number {
+  return Math.max(1, Math.ceil(total / PAGE_SIZE));
+}
+
+function getPageItems<T>(items: T[], page: number): T[] {
+  const start = (page - 1) * PAGE_SIZE;
+  return items.slice(start, start + PAGE_SIZE);
+}
+
+async function extractErrorMessage(err: any, fallback: string): Promise<string> {
+  const data = err?.response?.data;
+  if (data instanceof Blob) {
+    const text = await data.text();
+    try {
+      return JSON.parse(text).error ?? fallback;
+    } catch {
+      return text || fallback;
+    }
+  }
+  return data?.error ?? err.message ?? fallback;
+}
+
 function MetricTile({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
     <article className="metric-card">
@@ -32,9 +57,46 @@ function MetricTile({ label, value, sub }: { label: string; value: string; sub?:
   );
 }
 
+function Pagination({
+  page,
+  total,
+  onPageChange,
+}: {
+  page: number;
+  total: number;
+  onPageChange: (page: number) => void;
+}) {
+  const pageCount = getPageCount(total);
+  const start = total === 0 ? 0 : (page - 1) * PAGE_SIZE + 1;
+  const end = Math.min(page * PAGE_SIZE, total);
+
+  if (total <= PAGE_SIZE) {
+    return null;
+  }
+
+  return (
+    <div className="pagination">
+      <span>{formatNumber(start)}-{formatNumber(end)} / {formatNumber(total)}</span>
+      <div className="pagination-actions">
+        <button type="button" onClick={() => onPageChange(Math.max(1, page - 1))} disabled={page === 1}>
+          上一页
+        </button>
+        <span>{formatNumber(page)} / {formatNumber(pageCount)}</span>
+        <button type="button" onClick={() => onPageChange(Math.min(pageCount, page + 1))} disabled={page === pageCount}>
+          下一页
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [result, setResult] = useState<StaticAnalysisScanReport | null>(null);
   const [error, setError] = useState("");
+  const [filePage, setFilePage] = useState(1);
+  const [functionPage, setFunctionPage] = useState(1);
+  const [clonePage, setClonePage] = useState(1);
+  const [pdfLoading, setPdfLoading] = useState(false);
 
   const functionRows = useMemo<FunctionRow[]>(() => {
     return (result?.fileMetrics ?? []).flatMap((file) =>
@@ -45,6 +107,39 @@ export default function App() {
       }))
     );
   }, [result?.fileMetrics]);
+  const fileRows = result?.fileMetrics ?? [];
+  const cloneRows = result?.clonePairs ?? [];
+  const visibleFileRows = getPageItems(fileRows, filePage);
+  const visibleFunctionRows = getPageItems(functionRows, functionPage);
+  const visibleCloneRows = getPageItems(cloneRows, clonePage);
+
+  const downloadPdf = async () => {
+    if (!result || pdfLoading) {
+      return;
+    }
+
+    setPdfLoading(true);
+    setError("");
+
+    try {
+      const response = await axios.post<Blob>("/api/report/pdf", result, {
+        responseType: "blob",
+      });
+      const url = URL.createObjectURL(response.data);
+      const link = document.createElement("a");
+      const filename = `${result.projectKey.trim().replace(/[^\w.-]+/g, "-") || "analysis-report"}.pdf`;
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err: any) {
+      setError(await extractErrorMessage(err, "PDF 导出失败"));
+    } finally {
+      setPdfLoading(false);
+    }
+  };
 
   return (
     <main className="app-shell">
@@ -65,8 +160,14 @@ export default function App() {
           onDone={(data) => {
             setResult(data);
             setError("");
+            setFilePage(1);
+            setFunctionPage(1);
+            setClonePage(1);
           }}
           setError={setError}
+          canExportPdf={!!result}
+          pdfLoading={pdfLoading}
+          onExportPdf={downloadPdf}
         />
 
         {error && <div className="error-panel reveal">{error}</div>}
@@ -106,7 +207,7 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {result.fileMetrics.map((file) => (
+                    {visibleFileRows.map((file) => (
                       <tr key={file.file}>
                         <td className="code-cell">{file.file}</td>
                         <td>{file.language}</td>
@@ -122,6 +223,7 @@ export default function App() {
                   </tbody>
                 </table>
               </div>
+              <Pagination page={filePage} total={fileRows.length} onPageChange={setFilePage} />
             </section>
 
             <section className="surface-panel data-section reveal">
@@ -147,7 +249,7 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody>
-                      {functionRows.map((fn) => (
+                      {visibleFunctionRows.map((fn) => (
                         <tr key={`${fn.file}:${fn.startLine}:${fn.name}`}>
                           <td className="strong-cell">{fn.name}</td>
                           <td className="code-cell">{fn.file}:{fn.startLine}</td>
@@ -162,6 +264,7 @@ export default function App() {
                   </table>
                 </div>
               )}
+              <Pagination page={functionPage} total={functionRows.length} onPageChange={setFunctionPage} />
             </section>
 
             <section className="surface-panel data-section reveal">
@@ -184,7 +287,7 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody>
-                      {result.clonePairs.map((pair) => (
+                      {visibleCloneRows.map((pair) => (
                         <tr key={`${pair.fileA}:${pair.fileB}`}>
                           <td className="code-cell">{pair.fileA}</td>
                           <td className="code-cell">{pair.fileB}</td>
@@ -196,6 +299,7 @@ export default function App() {
                   </table>
                 </div>
               )}
+              <Pagination page={clonePage} total={cloneRows.length} onPageChange={setClonePage} />
             </section>
           </>
         )}

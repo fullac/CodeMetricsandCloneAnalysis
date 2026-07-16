@@ -5,9 +5,18 @@ import type { StaticAnalysisScanReport } from "../types";
 interface Props {
   onDone: (result: StaticAnalysisScanReport) => void;
   setError: (msg: string) => void;
+  canExportPdf: boolean;
+  pdfLoading: boolean;
+  onExportPdf: () => void;
 }
 
-export default function UploadPanel({ onDone, setError }: Props) {
+const PROJECT_NAME_MAX_LENGTH = 20;
+
+function normalizeProjectName(value: string): string {
+  return value.trim().slice(0, PROJECT_NAME_MAX_LENGTH);
+}
+
+export default function UploadPanel({ onDone, setError, canExportPdf, pdfLoading, onExportPdf }: Props) {
   const [projectKey, setProjectKey] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [progress, setProgress] = useState(0);
@@ -67,9 +76,9 @@ export default function UploadPanel({ onDone, setError }: Props) {
           <input
             className="form-input"
             value={projectKey}
-            onChange={(e) => setProjectKey(e.target.value)}
-            placeholder="不超过15个字符"
-            maxLength={15}
+            onChange={(e) => setProjectKey(e.target.value.slice(0, PROJECT_NAME_MAX_LENGTH))}
+            placeholder="不超过20个字符"
+            maxLength={PROJECT_NAME_MAX_LENGTH}
             required
           />
         </label>
@@ -87,7 +96,7 @@ export default function UploadPanel({ onDone, setError }: Props) {
                 setProjectKey("");
                 return;
               }
-              const autoKey = picked.name.replace(/\.[^.]+$/, "").trim().slice(0, 30);
+              const autoKey = normalizeProjectName(picked.name.replace(/\.[^.]+$/, ""));
               setProjectKey(autoKey);
             }}
             required
@@ -99,9 +108,14 @@ export default function UploadPanel({ onDone, setError }: Props) {
         支持 `.zip`、`.py`、`.java`、`.c`、`.h`、`.cpp`、`.cc`、`.cxx`、`.hpp`
       </p>
 
-      <button type="submit" disabled={loading} className="primary-button">
-        {loading ? "分析中..." : "开始分析"}
-      </button>
+      <div className="form-actions">
+        <button type="submit" disabled={loading} className="primary-button">
+          {loading ? "分析中..." : "开始分析"}
+        </button>
+        <button type="button" className="report-button" onClick={onExportPdf} disabled={!canExportPdf || pdfLoading}>
+          {pdfLoading ? "生成中" : "导出 PDF"}
+        </button>
+      </div>
 
       {loading && (
         <div className="progress-block">

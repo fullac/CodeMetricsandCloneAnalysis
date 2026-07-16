@@ -9,6 +9,7 @@ WORKDIR /app
 COPY package*.json ./
 COPY .npmrc ./
 RUN npm ci
+RUN npx playwright install --with-deps chromium
 
 COPY tsconfig.json ./
 COPY src ./src
