@@ -10,5 +10,10 @@ export const staticAnalysisRules: StaticAnalysisRule[] = [
 ];
 
 export function getRulesForLanguage(language: StaticAnalysisLanguage): StaticAnalysisRule[] {
+  if (language === "cpp") {
+    return staticAnalysisRules
+      .filter((rule) => rule.language === "c")
+      .map((rule) => ({ ...rule, language }));
+  }
   return staticAnalysisRules.filter((rule) => rule.language === language);
 }

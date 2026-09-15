@@ -46,6 +46,25 @@ export interface StaticAnalysisClonePair {
   matchingKGrams: number;
 }
 
+export interface StaticAnalysisScoreDeduction {
+  category: string;
+  label: string;
+  count?: number;
+  points: number;
+}
+
+export interface StaticAnalysisScore {
+  profileId: string;
+  profileVersion: string;
+  provenance: "official" | "provisional" | "custom";
+  score: number;
+  maxScore: number;
+  passScore: number;
+  passed: boolean;
+  deductions: StaticAnalysisScoreDeduction[];
+  failureReasons: string[];
+}
+
 export interface StaticAnalysisProjectMetrics {
   totalLines: number;
   ncloc: number;
@@ -67,6 +86,28 @@ export interface StaticAnalysisScanOptions {
   };
   languages: StaticAnalysisLanguage[];
   cloneThreshold: number;
+  scoring?: {
+    enabled: boolean;
+    profileId: string;
+    passScore?: number;
+    custom?: StaticAnalysisCustomScoreProfile;
+  };
+}
+
+export type StaticAnalysisScoreMetric = "maxComplexity" | "maxFunctionLines" | "maxNestingDepth" | "cloneRate";
+
+export interface StaticAnalysisScoreMetricRule {
+  threshold: number;
+  penalty: number;
+}
+
+export interface StaticAnalysisCustomScoreProfile {
+  id?: string;
+  version?: string;
+  title?: string;
+  passScore?: number;
+  findingPenalties?: Partial<Record<StaticAnalysisSeverity, number>>;
+  metrics?: Partial<Record<StaticAnalysisScoreMetric, StaticAnalysisScoreMetricRule>>;
 }
 
 export interface StaticAnalysisScanReport {
@@ -77,4 +118,5 @@ export interface StaticAnalysisScanReport {
   fileMetrics: StaticAnalysisFileMetrics[];
   findings: StaticAnalysisFinding[];
   clonePairs: StaticAnalysisClonePair[];
+  score?: StaticAnalysisScore;
 }

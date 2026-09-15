@@ -6,17 +6,22 @@ import { analyzeSourceTree } from "./analysis/analyzer.js";
 import { isSupportedSourceFilename } from "./analysis/language.js";
 import type {
   StaticAnalysisLanguage,
+  StaticAnalysisCustomScoreProfile,
   StaticAnalysisScanOptions,
   StaticAnalysisScanReport,
 } from "../types/index.js";
 
 const DEFAULT_SCAN_OPTIONS: StaticAnalysisScanOptions = {
   engines: {
-    rules: false,
+    rules: true,
     cloneDetection: true,
   },
   languages: ["python", "java", "c", "cpp"],
   cloneThreshold: 0.0,
+  scoring: {
+    enabled: true,
+    profileId: "nankai-provisional-v1",
+  },
 };
 
 export function normalizeScanOptions(input: unknown): StaticAnalysisScanOptions {
@@ -28,6 +33,11 @@ export function normalizeScanOptions(input: unknown): StaticAnalysisScanOptions 
   const cloneThreshold = typeof raw.cloneThreshold === "number" && Number.isFinite(raw.cloneThreshold)
     ? Math.min(1, Math.max(0, raw.cloneThreshold))
     : DEFAULT_SCAN_OPTIONS.cloneThreshold;
+  const scoring = raw.scoring && typeof raw.scoring === "object" ? raw.scoring : DEFAULT_SCAN_OPTIONS.scoring;
+  const passScore = typeof scoring?.passScore === "number" && Number.isFinite(scoring.passScore)
+    ? Math.min(100, Math.max(0, scoring.passScore))
+    : undefined;
+  const custom = normalizeCustomScoreProfile(scoring?.custom);
 
   return {
     engines: {
@@ -36,7 +46,44 @@ export function normalizeScanOptions(input: unknown): StaticAnalysisScanOptions 
     },
     languages: languages.length ? languages : DEFAULT_SCAN_OPTIONS.languages,
     cloneThreshold,
+    scoring: {
+      enabled: scoring?.enabled ?? DEFAULT_SCAN_OPTIONS.scoring?.enabled ?? true,
+      profileId: scoring?.profileId ?? DEFAULT_SCAN_OPTIONS.scoring?.profileId ?? "nankai-provisional-v1",
+      ...(passScore === undefined ? {} : { passScore }),
+      ...(custom ? { custom } : {}),
+    },
   };
+}
+
+function normalizeCustomScoreProfile(value: unknown): StaticAnalysisCustomScoreProfile | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const raw = value as StaticAnalysisCustomScoreProfile;
+  const metrics: StaticAnalysisCustomScoreProfile["metrics"] = {};
+  for (const metric of ["maxComplexity", "maxFunctionLines", "maxNestingDepth", "cloneRate"] as const) {
+    const candidate = raw.metrics?.[metric];
+    if (!candidate || typeof candidate !== "object") continue;
+    const threshold = typeof candidate.threshold === "number" && Number.isFinite(candidate.threshold)
+      ? Math.max(0, candidate.threshold)
+      : undefined;
+    const penalty = typeof candidate.penalty === "number" && Number.isFinite(candidate.penalty)
+      ? Math.max(0, candidate.penalty)
+      : undefined;
+    if (threshold !== undefined && penalty !== undefined) metrics[metric] = { threshold, penalty };
+  }
+  const findingPenalties: StaticAnalysisCustomScoreProfile["findingPenalties"] = {};
+  for (const severity of ["BLOCKER", "CRITICAL", "MAJOR", "MINOR"] as const) {
+    const penalty = raw.findingPenalties?.[severity];
+    if (typeof penalty === "number" && Number.isFinite(penalty)) findingPenalties[severity] = Math.max(0, penalty);
+  }
+  const custom: StaticAnalysisCustomScoreProfile = {
+    ...(typeof raw.id === "string" ? { id: raw.id } : {}),
+    ...(typeof raw.version === "string" ? { version: raw.version } : {}),
+    ...(typeof raw.title === "string" ? { title: raw.title } : {}),
+    ...(typeof raw.passScore === "number" && Number.isFinite(raw.passScore) ? { passScore: Math.min(100, Math.max(0, raw.passScore)) } : {}),
+    ...(Object.keys(findingPenalties).length ? { findingPenalties } : {}),
+    ...(Object.keys(metrics).length ? { metrics } : {}),
+  };
+  return Object.keys(custom).length ? custom : undefined;
 }
 
 export function parseScanOptionsJson(value: unknown): StaticAnalysisScanOptions {

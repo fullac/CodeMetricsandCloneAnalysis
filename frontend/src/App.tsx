@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import axios from "axios";
 import UploadPanel from "./components/UploadPanel";
-import type { StaticAnalysisFileMetrics, StaticAnalysisFunctionMetric, StaticAnalysisScanReport } from "./types";
+import type { StaticAnalysisFileMetrics, StaticAnalysisFunctionMetric, StaticAnalysisScanReport, StaticAnalysisSeverity } from "./types";
 
 type FunctionRow = StaticAnalysisFunctionMetric & {
   file: string;
@@ -57,6 +57,11 @@ function MetricTile({ label, value, sub }: { label: string; value: string; sub?:
   );
 }
 
+function scoreTone(score: StaticAnalysisScanReport["score"]): string {
+  if (!score) return "neutral";
+  return score.passed ? "passed" : "failed";
+}
+
 function Pagination({
   page,
   total,
@@ -97,6 +102,8 @@ export default function App() {
   const [functionPage, setFunctionPage] = useState(1);
   const [clonePage, setClonePage] = useState(1);
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [findingSeverity, setFindingSeverity] = useState<StaticAnalysisSeverity | "ALL">("ALL");
+  const [findingSearch, setFindingSearch] = useState("");
 
   const functionRows = useMemo<FunctionRow[]>(() => {
     return (result?.fileMetrics ?? []).flatMap((file) =>
@@ -109,6 +116,14 @@ export default function App() {
   }, [result?.fileMetrics]);
   const fileRows = result?.fileMetrics ?? [];
   const cloneRows = result?.clonePairs ?? [];
+  const findingRows = useMemo(() => {
+    const search = findingSearch.trim().toLowerCase();
+    return (result?.findings ?? []).filter((finding) => {
+      const severityMatches = findingSeverity === "ALL" || finding.severity === findingSeverity;
+      const searchMatches = !search || `${finding.ruleId} ${finding.file} ${finding.message}`.toLowerCase().includes(search);
+      return severityMatches && searchMatches;
+    });
+  }, [findingSearch, findingSeverity, result?.findings]);
   const visibleFileRows = getPageItems(fileRows, filePage);
   const visibleFunctionRows = getPageItems(functionRows, functionPage);
   const visibleCloneRows = getPageItems(cloneRows, clonePage);
@@ -176,6 +191,7 @@ export default function App() {
           <>
             <section className="metrics-grid reveal">
               <MetricTile label="项目" value={result.projectKey} sub={new Date(result.scannedAt).toLocaleString()} />
+              <MetricTile label="质量得分" value={result.score ? `${formatNumber(result.score.score, 1)} / ${result.score.maxScore}` : "未启用"} sub={result.score ? `通过线 ${formatNumber(result.score.passScore, 1)}` : "评分引擎关闭"} />
               <MetricTile label="文件数" value={formatNumber(result.fileMetrics.length)} sub={`${formatNumber(result.durationMs)} ms`} />
               <MetricTile label="代码行" value={formatNumber(result.metrics.ncloc)} sub={`总行数 ${formatNumber(result.metrics.totalLines)}`} />
               <MetricTile label="注释密度" value={formatPercent(result.metrics.commentDensity)} sub="AST comment nodes" />
@@ -183,6 +199,52 @@ export default function App() {
               <MetricTile label="平均复杂度" value={formatNumber(result.metrics.avgComplexity, 1)} sub={`最大 ${formatNumber(result.metrics.maxComplexity)}`} />
               <MetricTile label="超长函数" value={formatNumber(result.metrics.overLongFunctions)} sub="> 100 lines" />
               <MetricTile label="克隆率" value={formatPercent(result.metrics.cloneRate)} sub={`${formatNumber(result.clonePairs.length)} clone pairs`} />
+            </section>
+
+            {result.score && (
+              <section className={`score-layout reveal ${scoreTone(result.score)}`}>
+                <article className="score-summary">
+                  <div className="score-summary-top">
+                    <div>
+                      <div className="metric-label">质量门禁</div>
+                      <div className="score-value">{formatNumber(result.score.score, 1)}<span>/{result.score.maxScore}</span></div>
+                    </div>
+                    <span className="gate-badge">{result.score.passed ? "通过" : "未通过"}</span>
+                  </div>
+                  <div className="score-meta">{result.score.profileId} · v{result.score.profileVersion} · {result.score.provenance === "provisional" ? "临时档案" : result.score.provenance}</div>
+                  {!result.score.passed && result.score.failureReasons.map((reason) => <div className="gate-reason" key={reason}>{reason}</div>)}
+                </article>
+                <article className="score-deductions">
+                  <div className="section-heading compact-heading"><h2>扣分明细</h2><span className="count-badge">{formatNumber(result.score.deductions.length)} 项</span></div>
+                  {result.score.deductions.length === 0 ? <div className="empty-panel">暂无扣分项</div> : (
+                    <div className="deduction-list">
+                      {result.score.deductions.map((item) => (
+                        <div className="deduction-row" key={`${item.category}:${item.label}`}><span>{item.label}{item.count ? ` × ${item.count}` : ""}</span><strong>-{formatNumber(item.points, 1)}</strong></div>
+                      ))}
+                    </div>
+                  )}
+                </article>
+              </section>
+            )}
+
+            <section className="surface-panel data-section reveal">
+              <div className="section-heading">
+                <div><h2>规则问题</h2><div className="section-subtitle">按严重级别和文件快速定位需要处理的代码</div></div>
+                <span className="count-badge">{formatNumber(findingRows.length)} / {formatNumber(result.findings.length)}</span>
+              </div>
+              <div className="finding-filters">
+                <input className="form-input finding-search" value={findingSearch} onChange={(event) => setFindingSearch(event.target.value)} placeholder="搜索规则、文件或问题" />
+                <select className="form-input severity-select" value={findingSeverity} onChange={(event) => setFindingSeverity(event.target.value as StaticAnalysisSeverity | "ALL")}>
+                  <option value="ALL">全部级别</option><option value="BLOCKER">BLOCKER</option><option value="CRITICAL">CRITICAL</option><option value="MAJOR">MAJOR</option><option value="MINOR">MINOR</option>
+                </select>
+              </div>
+              {findingRows.length === 0 ? <div className="empty-panel">未发现符合筛选条件的规则问题</div> : (
+                <div className="table-wrap">
+                  <table className="data-table findings-table"><thead><tr><th>Severity</th><th>Rule</th><th>File</th><th>Line</th><th>Message</th></tr></thead><tbody>
+                    {findingRows.map((finding) => <tr key={finding.id}><td><span className={`severity-pill severity-${finding.severity.toLowerCase()}`}>{finding.severity}</span></td><td className="strong-cell">{finding.ruleId}</td><td className="code-cell">{finding.file}</td><td className="numeric">{finding.line}:{finding.column}</td><td>{finding.message}</td></tr>)}
+                  </tbody></table>
+                </div>
+              )}
             </section>
 
             <section className="surface-panel data-section reveal">

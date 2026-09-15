@@ -6,8 +6,11 @@ services:
     container_name: code-analysis-backend
     environment:
       PORT: 3001
+      FINGERPRINT_DB_PATH: /app/data/fingerprints.sqlite
     ports:
       - "3001:3001"
+    volumes:
+      - ../backend/data:/app/data
     restart: unless-stopped
 
   frontend:

@@ -142,13 +142,44 @@ npm run dev
 ```json
 {
   "engines": {
-    "rules": false,
+    "rules": true,
     "cloneDetection": true
   },
   "languages": ["python", "java", "c", "cpp"],
-  "cloneThreshold": 0
+  "cloneThreshold": 0,
+  "scoring": {
+    "enabled": true,
+    "profileId": "nankai-provisional-v1",
+    "passScore": 60
+  }
 }
 ```
+
+也可以传入自定义门禁。指标阈值使用原始指标单位，`cloneRate` 使用 `0~1` 的比例；普通指标每个超限函数扣一次 `penalty` 分，克隆率按“超过阈值的比例 × penalty”扣分。
+
+```json
+{
+  "scoring": {
+    "enabled": true,
+    "profileId": "custom-gate",
+    "custom": {
+      "id": "team-gate",
+      "version": "2026.09",
+      "title": "团队代码门禁",
+      "passScore": 80,
+      "metrics": {
+        "maxComplexity": { "threshold": 10, "penalty": 3 },
+        "maxFunctionLines": { "threshold": 80, "penalty": 1 },
+        "maxNestingDepth": { "threshold": 4, "penalty": 2 },
+        "cloneRate": { "threshold": 0.15, "penalty": 20 }
+      },
+      "findingPenalties": { "BLOCKER": 20, "CRITICAL": 8, "MAJOR": 3, "MINOR": 1 }
+    }
+  }
+}
+```
+
+自定义档案的 `provenance` 会在返回结果中标记为 `custom`。未传 `custom` 时仍使用默认的临时档案；设置 `scoring.enabled=false` 可关闭评分。
 
 返回字段包括：
 
@@ -156,6 +187,7 @@ npm run dev
 - `fileMetrics`：文件级指标
 - `findings`：规则发现项
 - `clonePairs`：克隆文件对
+- `score`：评分档案、得分、扣分明细和门禁通过状态
 
 ### `POST /api/report/pdf`
 
@@ -168,5 +200,7 @@ npm run dev
 ## 说明
 
 - 上传文件会被解压到系统临时目录，分析完成后自动清理。
-- 克隆检测默认开启，规则引擎默认关闭。
-- `backend/data/` 为运行期数据目录，已被 `.gitignore` 忽略。
+- 克隆检测、规则引擎和临时评分档案默认开启，可通过 `scanOptions` 显式关闭。
+- 代码指纹默认持久化到 `backend/data/fingerprints.sqlite`，可用 `FINGERPRINT_DB_PATH` 覆盖。
+- 首次启动时，如果同目录存在旧版 `fingerprints.json`，后端会自动导入到 SQLite。
+- Docker 部署会把 `backend/data` 挂载到后端容器，保证容器重启后指纹历史仍然存在。

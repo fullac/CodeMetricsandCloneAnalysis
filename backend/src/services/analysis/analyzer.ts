@@ -4,6 +4,8 @@ import { createFingerprint, type CloneFingerprint } from "../clone/fingerprint.j
 import { loadStoredFingerprints, saveProjectFingerprints } from "../clone/fingerprintStore.js";
 import { aggregateProjectMetrics } from "../metrics/aggregate.js";
 import { analyzeFileMetrics } from "../metrics/index.js";
+import { scoreReport } from "../scoring/index.js";
+import { runRules } from "../rules/engine.js";
 import { discoverSourceFiles } from "./fileDiscovery.js";
 import { parseSource } from "./parser.js";
 import type {
@@ -15,9 +17,13 @@ import type {
 type AnalyzedFile = {
   metrics: StaticAnalysisFileMetrics;
   fingerprint: CloneFingerprint;
+  findings: ReturnType<typeof runRules>;
 };
 
-async function analyzeSourceFile(sourceFile: Awaited<ReturnType<typeof discoverSourceFiles>>["files"][number]): Promise<AnalyzedFile> {
+async function analyzeSourceFile(
+  sourceFile: Awaited<ReturnType<typeof discoverSourceFiles>>["files"][number],
+  rulesEnabled: boolean,
+): Promise<AnalyzedFile> {
   const content = await fs.readFile(sourceFile.absolutePath, "utf8");
   const tree = parseSource(content, sourceFile.language);
   const root = tree.rootNode;
@@ -35,6 +41,13 @@ async function analyzeSourceFile(sourceFile: Awaited<ReturnType<typeof discoverS
       root,
       ncloc: metrics.ncloc,
     }),
+    findings: rulesEnabled ? runRules({
+      file: sourceFile.relativePath,
+      language: sourceFile.language,
+      content,
+      root,
+      metrics,
+    }) : [],
   };
 }
 
@@ -46,9 +59,10 @@ export async function analyzeSourceTree(input: {
 }): Promise<StaticAnalysisScanReport> {
   const startedAt = input.startedAt ?? Date.now();
   const discovery = await discoverSourceFiles(input.rootDir, new Set(input.options.languages));
-  const analyzedFiles = await Promise.all(discovery.files.map((sourceFile) => analyzeSourceFile(sourceFile)));
+  const analyzedFiles = await Promise.all(discovery.files.map((sourceFile) => analyzeSourceFile(sourceFile, input.options.engines.rules)));
   const fileMetrics = analyzedFiles.map((file) => file.metrics);
   const fingerprints = analyzedFiles.map((file) => file.fingerprint);
+  const findings = analyzedFiles.flatMap((file) => file.findings);
   const historicalFingerprints = input.options.engines.cloneDetection
     ? await loadStoredFingerprints().catch((err) => {
       console.warn(`Load clone fingerprints failed: ${(err as Error).message}`);
@@ -83,13 +97,23 @@ export async function analyzeSourceTree(input: {
     console.warn(`Save clone fingerprints failed: ${(err as Error).message}`);
   });
 
-  return {
+  const report: StaticAnalysisScanReport = {
     projectKey: input.projectKey,
     scannedAt: new Date().toISOString(),
     durationMs: Date.now() - startedAt,
     metrics: aggregateProjectMetrics(fileMetrics, cloneRate),
     fileMetrics,
-    findings: [],
+    findings,
     clonePairs,
   };
+
+  if (input.options.scoring?.enabled !== false) {
+    report.score = scoreReport(report, {
+      profileId: input.options.scoring?.profileId,
+      passScore: input.options.scoring?.passScore,
+      custom: input.options.scoring?.custom,
+    });
+  }
+
+  return report;
 }

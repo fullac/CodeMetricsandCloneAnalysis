@@ -88,6 +88,21 @@ function renderCloneRows(report: StaticAnalysisScanReport): string {
   `).join("");
 }
 
+function renderFindingRows(report: StaticAnalysisScanReport): string {
+  if (report.findings.length === 0) {
+    return `<tr><td colspan="5" class="empty">未发现规则问题</td></tr>`;
+  }
+  return report.findings.map((finding) => `
+    <tr>
+      <td>${escapeHtml(finding.severity)}</td>
+      <td>${escapeHtml(finding.ruleId)}</td>
+      <td class="code">${escapeHtml(finding.file)}</td>
+      <td class="num">${formatNumber(finding.line)}:${formatNumber(finding.column)}</td>
+      <td>${escapeHtml(finding.message)}</td>
+    </tr>
+  `).join("");
+}
+
 export function renderAnalysisReportHtml(report: StaticAnalysisScanReport): string {
   const functions = report.fileMetrics.flatMap((file) => file.functions.map((fn) => ({
     ...fn,
@@ -201,6 +216,9 @@ export function renderAnalysisReportHtml(report: StaticAnalysisScanReport): stri
       padding: 14px;
     }
     .section { page-break-inside: avoid; }
+    .gate-pass { color: #166534; }
+    .gate-fail { color: #991b1b; }
+    .deduction { color: #991b1b; }
   </style>
 </head>
 <body>
@@ -213,6 +231,7 @@ export function renderAnalysisReportHtml(report: StaticAnalysisScanReport): stri
   </header>
 
   <section class="metric-grid">
+    ${report.score ? renderMetric("质量得分", `${formatNumber(report.score.score, 1)} / ${formatNumber(report.score.maxScore)}`, `${report.score.passed ? "门禁通过" : "门禁未通过"}，通过线 ${formatNumber(report.score.passScore, 1)}`) : ""}
     ${renderMetric("文件数", formatNumber(report.fileMetrics.length))}
     ${renderMetric("代码行", formatNumber(report.metrics.ncloc), `总行数 ${formatNumber(report.metrics.totalLines)}`)}
     ${renderMetric("注释密度", formatPercent(report.metrics.commentDensity))}
@@ -221,6 +240,20 @@ export function renderAnalysisReportHtml(report: StaticAnalysisScanReport): stri
     ${renderMetric("超长函数", formatNumber(report.metrics.overLongFunctions), "> 100 lines")}
     ${renderMetric("深层嵌套", formatNumber(report.metrics.deeplyNestedFunctions), "> 4 levels")}
     ${renderMetric("克隆率", formatPercent(report.metrics.cloneRate), `${formatNumber(report.clonePairs.length)} clone pairs`)}
+  </section>
+
+  ${report.score ? `<section>
+    <h2>质量门禁</h2>
+    <p class="${report.score.passed ? "gate-pass" : "gate-fail"}"><strong>${report.score.passed ? "通过" : "未通过"}</strong> ｜ 档案 ${escapeHtml(report.score.profileId)} v${escapeHtml(report.score.profileVersion)} ｜ 来源 ${escapeHtml(report.score.provenance)}</p>
+    <table><thead><tr><th>扣分项</th><th class="num">次数</th><th class="num">扣分</th></tr></thead><tbody>${report.score.deductions.length === 0 ? `<tr><td colspan="3" class="empty">暂无扣分项</td></tr>` : report.score.deductions.map((item) => `<tr><td>${escapeHtml(item.label)}</td><td class="num">${item.count === undefined ? "-" : formatNumber(item.count)}</td><td class="num deduction">-${formatNumber(item.points, 1)}</td></tr>`).join("")}</tbody></table>
+  </section>` : ""}
+
+  <section>
+    <h2>规则问题</h2>
+    <table>
+      <thead><tr><th>Severity</th><th>Rule</th><th>File</th><th class="num">Line</th><th>Message</th></tr></thead>
+      <tbody>${renderFindingRows(report)}</tbody>
+    </table>
   </section>
 
   <section>
