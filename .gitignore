@@ -7,5 +7,6 @@ dist/
 .sonar/
 backend/data/
 .doc/
+PLAN.md
 proj_details.md
 CodeScoreMcp/
