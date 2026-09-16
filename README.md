@@ -146,7 +146,7 @@ npm run dev
     "cloneDetection": true
   },
   "languages": ["python", "java", "c", "cpp"],
-  "cloneThreshold": 0,
+  "cloneThreshold": 0.2,
   "scoring": {
     "enabled": true,
     "profileId": "nankai-provisional-v1",
@@ -155,7 +155,9 @@ npm run dev
 }
 ```
 
-也可以传入自定义门禁。指标阈值使用原始指标单位，`cloneRate` 使用 `0~1` 的比例；普通指标每个超限函数扣一次 `penalty` 分，克隆率按“超过阈值的比例 × penalty”扣分。
+默认临时评分标准：通过分数 60；规则问题按 BLOCKER 5 分、CRITICAL 3 分、MAJOR 1 分、MINOR 0.5 分逐条扣除；函数复杂度 20、函数行数 150、嵌套深度 6、克隆率 20% 后开始扣分；默认克隆相似度检测阈值为 20%。
+
+也可以传入自定义评分标准。指标阈值使用原始指标单位，`cloneRate` 使用 `0~1` 的比例；普通指标每个超限函数扣一次 `penalty` 分，克隆率按“超过阈值的比例 × penalty”扣分。
 
 ```json
 {
@@ -165,7 +167,7 @@ npm run dev
     "custom": {
       "id": "team-gate",
       "version": "2026.09",
-      "title": "团队代码门禁",
+      "title": "团队评分标准",
       "passScore": 80,
       "metrics": {
         "maxComplexity": { "threshold": 10, "penalty": 3 },

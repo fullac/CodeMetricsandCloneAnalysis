@@ -54,6 +54,11 @@ export interface StaticAnalysisClonePair {
   fileB: string;
   jaccardSimilarity: number;
   matchingKGrams: number;
+  kind?: "file" | "block";
+  startLineA?: number;
+  endLineA?: number;
+  startLineB?: number;
+  endLineB?: number;
 }
 
 export interface StaticAnalysisProjectMetrics {
@@ -122,6 +127,7 @@ export interface StaticAnalysisScore {
 
 export interface StaticAnalysisScanReport {
   projectKey: string;
+  sourceName?: string;
   scannedAt: string;
   durationMs: number;
   metrics: StaticAnalysisProjectMetrics;

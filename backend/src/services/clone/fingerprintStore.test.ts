@@ -40,6 +40,15 @@ test("imports legacy JSON fingerprints once", async () => {
     const legacy = {
       version: 1,
       projects: {
+        incomplete: {
+          projectKey: "incomplete",
+          updatedAt: "2025-12-31T00:00:00.000Z",
+          files: [{
+            ...fingerprint("incomplete.py", 3),
+            kGramHashes: undefined,
+            kGramHashCount: 2,
+          }],
+        },
         legacy: {
           projectKey: "legacy",
           updatedAt: "2026-01-01T00:00:00.000Z",
@@ -51,6 +60,7 @@ test("imports legacy JSON fingerprints once", async () => {
     const stored = await loadStoredFingerprints({ dbPath });
     assert.equal(stored[0]?.projectKey, "legacy");
     assert.equal(stored[0]?.file, "legacy.py");
+    assert.equal(stored.some((item) => item.projectKey === "incomplete"), false);
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }

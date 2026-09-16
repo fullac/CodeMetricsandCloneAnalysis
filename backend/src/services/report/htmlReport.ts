@@ -75,13 +75,13 @@ function renderFunctionRows(functions: FunctionRow[]): string {
 
 function renderCloneRows(report: StaticAnalysisScanReport): string {
   if (report.clonePairs.length === 0) {
-    return `<tr><td colspan="4" class="empty">未检测到超过阈值的克隆文件对</td></tr>`;
+    return `<tr><td colspan="4" class="empty">未检测到跨文件或同文件重复代码段</td></tr>`;
   }
 
   return report.clonePairs.map((pair) => `
     <tr>
-      <td class="code">${escapeHtml(pair.fileA)}</td>
-      <td class="code">${escapeHtml(pair.fileB)}</td>
+      <td class="code">${escapeHtml(pair.startLineA ? `${pair.fileA}:${pair.startLineA}-${pair.endLineA}` : pair.fileA)}</td>
+      <td class="code">${escapeHtml(pair.startLineB ? `${pair.fileB}:${pair.startLineB}-${pair.endLineB}` : pair.fileB)}</td>
       <td class="num">${formatPercent(pair.jaccardSimilarity)}</td>
       <td class="num">${formatNumber(pair.matchingKGrams)}</td>
     </tr>
@@ -231,19 +231,19 @@ export function renderAnalysisReportHtml(report: StaticAnalysisScanReport): stri
   </header>
 
   <section class="metric-grid">
-    ${report.score ? renderMetric("质量得分", `${formatNumber(report.score.score, 1)} / ${formatNumber(report.score.maxScore)}`, `${report.score.passed ? "门禁通过" : "门禁未通过"}，通过线 ${formatNumber(report.score.passScore, 1)}`) : ""}
+    ${report.score ? renderMetric("质量得分", `${formatNumber(report.score.score, 1)} / ${formatNumber(report.score.maxScore)}`, `${report.score.passed ? "评分通过" : "评分未通过"}，通过线 ${formatNumber(report.score.passScore, 1)}`) : ""}
     ${renderMetric("文件数", formatNumber(report.fileMetrics.length))}
     ${renderMetric("代码行", formatNumber(report.metrics.ncloc), `总行数 ${formatNumber(report.metrics.totalLines)}`)}
     ${renderMetric("注释密度", formatPercent(report.metrics.commentDensity))}
     ${renderMetric("函数数", formatNumber(report.metrics.functionCount), `类/结构 ${formatNumber(report.metrics.classCount)}`)}
     ${renderMetric("平均复杂度", formatNumber(report.metrics.avgComplexity, 1), `最大 ${formatNumber(report.metrics.maxComplexity)}`)}
-    ${renderMetric("超长函数", formatNumber(report.metrics.overLongFunctions), "> 100 lines")}
-    ${renderMetric("深层嵌套", formatNumber(report.metrics.deeplyNestedFunctions), "> 4 levels")}
+    ${renderMetric("超长函数", formatNumber(report.metrics.overLongFunctions), "按本次评分标准统计")}
+    ${renderMetric("深层嵌套", formatNumber(report.metrics.deeplyNestedFunctions), "按本次评分标准统计")}
     ${renderMetric("克隆率", formatPercent(report.metrics.cloneRate), `${formatNumber(report.clonePairs.length)} clone pairs`)}
   </section>
 
   ${report.score ? `<section>
-    <h2>质量门禁</h2>
+    <h2>评分标准</h2>
     <p class="${report.score.passed ? "gate-pass" : "gate-fail"}"><strong>${report.score.passed ? "通过" : "未通过"}</strong> ｜ 档案 ${escapeHtml(report.score.profileId)} v${escapeHtml(report.score.profileVersion)} ｜ 来源 ${escapeHtml(report.score.provenance)}</p>
     <table><thead><tr><th>扣分项</th><th class="num">次数</th><th class="num">扣分</th></tr></thead><tbody>${report.score.deductions.length === 0 ? `<tr><td colspan="3" class="empty">暂无扣分项</td></tr>` : report.score.deductions.map((item) => `<tr><td>${escapeHtml(item.label)}</td><td class="num">${item.count === undefined ? "-" : formatNumber(item.count)}</td><td class="num deduction">-${formatNumber(item.points, 1)}</td></tr>`).join("")}</tbody></table>
   </section>` : ""}
@@ -302,7 +302,7 @@ export function renderAnalysisReportHtml(report: StaticAnalysisScanReport): stri
           <th>File A</th>
           <th>File B</th>
           <th class="num" style="width: 14%;">Similarity</th>
-          <th class="num" style="width: 16%;">K-Grams</th>
+          <th class="num" style="width: 16%;">重复代码片段数</th>
         </tr>
       </thead>
       <tbody>${renderCloneRows(report)}</tbody>

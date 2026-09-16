@@ -41,18 +41,55 @@ test("score passes at the configured boundary and reports deductions", () => {
     snippet: "eval()",
   }];
   const result = calculateScore({ report: input, profile: DEFAULT_SCORE_PROFILE, passScore: 90 });
-  assert.equal(result.score, 90);
+  assert.equal(result.score, 97);
   assert.equal(result.passed, true);
-  assert.equal(result.deductions[0]?.points, 10);
+  assert.equal(result.deductions[0]?.points, 3);
 });
 
 test("score fails below the configured threshold", () => {
   const input = report();
-  input.metrics.overComplexFunctions = 25;
+  input.metrics.overComplexFunctions = 50;
   const result = calculateScore({ report: input, profile: DEFAULT_SCORE_PROFILE, passScore: 60 });
   assert.equal(result.score, 50);
   assert.equal(result.passed, false);
   assert.match(result.failureReasons[0] ?? "", /低于通过线/);
+});
+
+test("default provisional profile uses relaxed thresholds and deductions", () => {
+  assert.equal(DEFAULT_SCORE_PROFILE.version, "1.2.0");
+  assert.deepEqual(DEFAULT_SCORE_PROFILE.findingPenalties, {
+    BLOCKER: 5,
+    CRITICAL: 3,
+    MAJOR: 1,
+    MINOR: 0.5,
+  });
+  assert.deepEqual(DEFAULT_SCORE_PROFILE.metricThresholds, {
+    maxComplexity: { threshold: 20, penalty: 1 },
+    maxFunctionLines: { threshold: 150, penalty: 0.5 },
+    maxNestingDepth: { threshold: 6, penalty: 0.5 },
+    cloneRate: { threshold: 0.2, penalty: 10 },
+  });
+  assert.equal(DEFAULT_SCORE_PROFILE.findingPenalties.MINOR, 0.5);
+});
+
+test("custom profile applies configured finding penalties", () => {
+  const input = report();
+  input.findings = [{
+    id: "finding-1",
+    ruleId: "py-eval",
+    severity: "CRITICAL",
+    type: "VULNERABILITY",
+    file: "main.py",
+    line: 1,
+    column: 1,
+    message: "eval",
+    snippet: "eval()",
+  }];
+  const result = scoreReport(input, {
+    custom: { findingPenalties: { CRITICAL: 1.5 } },
+  });
+  assert.equal(result.score, 98.5);
+  assert.equal(result.deductions[0]?.points, 1.5);
 });
 
 test("custom profile applies configured metric thresholds", () => {

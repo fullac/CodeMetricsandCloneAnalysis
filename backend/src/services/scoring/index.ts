@@ -5,26 +5,26 @@ export type { ScoreModelInput, ScoreModelResult, ScoreProfile } from "./types.js
 
 export const DEFAULT_SCORE_PROFILE: ScoreProfile = {
   id: "nankai-provisional-v1",
-  version: "1.0.0",
+  version: "1.2.0",
   title: "南开代码质量评分（临时档案）",
   provenance: "provisional",
   findingPenalties: {
-    BLOCKER: 20,
-    CRITICAL: 10,
-    MAJOR: 4,
-    MINOR: 1,
+    BLOCKER: 5,
+    CRITICAL: 3,
+    MAJOR: 1,
+    MINOR: 0.5,
   },
   metricPenalties: {
-    overComplexFunction: 2,
-    overLongFunction: 1,
-    deeplyNestedFunction: 1,
-    cloneRateWeight: 20,
+    overComplexFunction: 1,
+    overLongFunction: 0.5,
+    deeplyNestedFunction: 0.5,
+    cloneRateWeight: 10,
   },
   metricThresholds: {
-    maxComplexity: { threshold: 15, penalty: 2 },
-    maxFunctionLines: { threshold: 100, penalty: 1 },
-    maxNestingDepth: { threshold: 4, penalty: 1 },
-    cloneRate: { threshold: 0, penalty: 20 },
+    maxComplexity: { threshold: 20, penalty: 1 },
+    maxFunctionLines: { threshold: 150, penalty: 0.5 },
+    maxNestingDepth: { threshold: 6, penalty: 0.5 },
+    cloneRate: { threshold: 0.2, penalty: 10 },
   },
   passScore: 60,
 };
@@ -128,7 +128,7 @@ export function createCustomScoreProfile(custom: StaticAnalysisCustomScoreProfil
   return {
     id: custom.id?.trim() || "custom-gate",
     version: custom.version?.trim() || "1.0.0",
-    title: custom.title?.trim() || "自定义质量门禁",
+    title: custom.title?.trim() || "自定义评分标准",
     provenance: "custom",
     findingPenalties: {
       ...defaults.findingPenalties,
@@ -142,8 +142,12 @@ export function createCustomScoreProfile(custom: StaticAnalysisCustomScoreProfil
   };
 }
 
+export function resolveScoreProfile(input: { profileId?: string; custom?: StaticAnalysisCustomScoreProfile } = {}): ScoreProfile {
+  return input.custom ? createCustomScoreProfile(input.custom) : getScoreProfile(input.profileId);
+}
+
 export function scoreReport(report: StaticAnalysisScanReport, input: { profileId?: string; passScore?: number; custom?: StaticAnalysisCustomScoreProfile } = {}): ScoreModelResult {
-  const profile = input.custom ? createCustomScoreProfile(input.custom) : getScoreProfile(input.profileId);
+  const profile = resolveScoreProfile(input);
   return calculateScore({
     report,
     profile,

@@ -17,7 +17,7 @@ const DEFAULT_SCAN_OPTIONS: StaticAnalysisScanOptions = {
     cloneDetection: true,
   },
   languages: ["python", "java", "c", "cpp"],
-  cloneThreshold: 0.0,
+  cloneThreshold: 0.2,
   scoring: {
     enabled: true,
     profileId: "nankai-provisional-v1",
@@ -136,12 +136,13 @@ export async function analyzeProject(input: {
   try {
     const prepared = await prepareInput(input.filePath, input.originalName);
     cleanupDir = prepared.cleanupDir;
-    return await analyzeSourceTree({
+    const report = await analyzeSourceTree({
       rootDir: prepared.rootDir,
       projectKey: input.projectKey,
       options: input.options ?? DEFAULT_SCAN_OPTIONS,
       startedAt,
     });
+    return { ...report, sourceName: input.originalName };
   } finally {
     if (cleanupDir) {
       await fs.rm(cleanupDir, { recursive: true, force: true });

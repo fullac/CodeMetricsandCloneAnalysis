@@ -16,6 +16,11 @@ export interface CloneFingerprint {
   ncloc: number;
 }
 
+export type NormalizedAstToken = {
+  value: string;
+  line: number;
+};
+
 function hashString(input: string, seed = 2166136261): number {
   let hash = seed >>> 0;
   for (let i = 0; i < input.length; i += 1) {
@@ -56,8 +61,8 @@ function normalizeLeafToken(node: Parser.SyntaxNode): string | null {
   return node.type;
 }
 
-export function normalizeAstTokens(root: Parser.SyntaxNode): string[] {
-  const tokens: string[] = [];
+export function normalizeAstTokenLocations(root: Parser.SyntaxNode): NormalizedAstToken[] {
+  const tokens: NormalizedAstToken[] = [];
 
   function walk(node: Parser.SyntaxNode): void {
     if (isCommentNode(node)) {
@@ -66,7 +71,7 @@ export function normalizeAstTokens(root: Parser.SyntaxNode): string[] {
     if (node.childCount === 0) {
       const token = normalizeLeafToken(node);
       if (token) {
-        tokens.push(token);
+        tokens.push({ value: token, line: node.startPosition.row + 1 });
       }
       return;
     }
@@ -79,14 +84,23 @@ export function normalizeAstTokens(root: Parser.SyntaxNode): string[] {
   return tokens;
 }
 
+export function normalizeAstTokens(root: Parser.SyntaxNode): string[] {
+  return normalizeAstTokenLocations(root).map((token) => token.value);
+}
+
+export function hashNormalizedTokens(tokens: string[]): number {
+  return hashString(tokens.join("\u0001"));
+}
+
 export function createKGramHashes(tokens: string[], kGramSize = DEFAULT_K_GRAM_SIZE): number[] {
-  if (tokens.length < kGramSize) {
+  if (tokens.length === 0) {
     return [];
   }
 
+  const effectiveKGramSize = Math.min(tokens.length, kGramSize);
   const hashes: number[] = [];
-  for (let i = 0; i <= tokens.length - kGramSize; i += 1) {
-    hashes.push(hashString(tokens.slice(i, i + kGramSize).join("\u0001")));
+  for (let i = 0; i <= tokens.length - effectiveKGramSize; i += 1) {
+    hashes.push(hashNormalizedTokens(tokens.slice(i, i + effectiveKGramSize)));
   }
   return Array.from(new Set(hashes));
 }
@@ -116,7 +130,8 @@ export function createFingerprint(input: {
   kGramSize?: number;
 }): CloneFingerprint {
   const tokens = normalizeAstTokens(input.root);
-  const kGramSize = input.kGramSize ?? DEFAULT_K_GRAM_SIZE;
+  const configuredKGramSize = input.kGramSize ?? DEFAULT_K_GRAM_SIZE;
+  const kGramSize = Math.min(configuredKGramSize, Math.max(1, tokens.length));
   const kGramHashes = createKGramHashes(tokens, kGramSize);
   return {
     file: input.file,

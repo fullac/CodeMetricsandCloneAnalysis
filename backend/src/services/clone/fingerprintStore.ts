@@ -8,10 +8,15 @@ export type StoredCloneFingerprint = CloneFingerprint & {
   updatedAt: string;
 };
 
+type LegacyCloneFingerprint = Omit<CloneFingerprint, "kGramHashes"> & {
+  kGramHashes?: number[];
+  kGramHashCount?: number;
+};
+
 type LegacyStoredProject = {
   projectKey: string;
   updatedAt: string;
-  files: Array<CloneFingerprint & { kGramHashCount: number }>;
+  files: LegacyCloneFingerprint[];
 };
 
 type LegacyFingerprintDatabase = {
@@ -109,7 +114,12 @@ async function migrateLegacyJson(db: Database.Database, dbPath: string): Promise
     const legacy = JSON.parse(raw) as LegacyFingerprintDatabase;
     const importTransaction = db.transaction(() => {
       for (const project of Object.values(legacy.projects ?? {})) {
-        const fingerprints = project.files.map(({ kGramHashCount: _kGramHashCount, ...fingerprint }) => fingerprint);
+        const fingerprints = project.files.flatMap(({ kGramHashCount: _kGramHashCount, ...fingerprint }) => {
+          if (!Array.isArray(fingerprint.kGramHashes) || !Array.isArray(fingerprint.signature)) {
+            return [];
+          }
+          return [{ ...fingerprint, kGramHashes: fingerprint.kGramHashes }];
+        });
         if (!db.prepare("SELECT 1 FROM fingerprint_projects WHERE project_key = ?").get(project.projectKey)) {
           insertProject(db, project.projectKey, project.updatedAt, fingerprints);
         }
@@ -130,9 +140,14 @@ async function migrateLegacyJson(db: Database.Database, dbPath: string): Promise
 async function openDatabase(dbPath: string): Promise<Database.Database> {
   await fs.mkdir(path.dirname(dbPath), { recursive: true });
   const db = new Database(dbPath);
-  initializeDatabase(db);
-  await migrateLegacyJson(db, dbPath);
-  return db;
+  try {
+    initializeDatabase(db);
+    await migrateLegacyJson(db, dbPath);
+    return db;
+  } catch (error) {
+    db.close();
+    throw error;
+  }
 }
 
 export async function saveProjectFingerprints(input: {

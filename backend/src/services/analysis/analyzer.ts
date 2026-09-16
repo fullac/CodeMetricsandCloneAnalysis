@@ -1,10 +1,10 @@
 import { promises as fs } from "node:fs";
-import { calculateCloneRate, detectClonePairs, detectClonePairsBetween } from "../clone/cloneService.js";
-import { createFingerprint, type CloneFingerprint } from "../clone/fingerprint.js";
+import { calculateCloneRate, detectClonePairs, detectClonePairsBetween, detectInternalClonePairs } from "../clone/cloneService.js";
+import { createFingerprint, normalizeAstTokenLocations, type CloneFingerprint } from "../clone/fingerprint.js";
 import { loadStoredFingerprints, saveProjectFingerprints } from "../clone/fingerprintStore.js";
 import { aggregateProjectMetrics } from "../metrics/aggregate.js";
 import { analyzeFileMetrics } from "../metrics/index.js";
-import { scoreReport } from "../scoring/index.js";
+import { calculateScore, DEFAULT_SCORE_PROFILE, resolveScoreProfile } from "../scoring/index.js";
 import { runRules } from "../rules/engine.js";
 import { discoverSourceFiles } from "./fileDiscovery.js";
 import { parseSource } from "./parser.js";
@@ -18,11 +18,13 @@ type AnalyzedFile = {
   metrics: StaticAnalysisFileMetrics;
   fingerprint: CloneFingerprint;
   findings: ReturnType<typeof runRules>;
+  internalClonePairs: ReturnType<typeof detectInternalClonePairs>;
 };
 
 async function analyzeSourceFile(
   sourceFile: Awaited<ReturnType<typeof discoverSourceFiles>>["files"][number],
   rulesEnabled: boolean,
+  cloneDetectionEnabled: boolean,
 ): Promise<AnalyzedFile> {
   const content = await fs.readFile(sourceFile.absolutePath, "utf8");
   const tree = parseSource(content, sourceFile.language);
@@ -48,6 +50,10 @@ async function analyzeSourceFile(
       root,
       metrics,
     }) : [],
+    internalClonePairs: cloneDetectionEnabled ? detectInternalClonePairs({
+      file: sourceFile.relativePath,
+      tokens: normalizeAstTokenLocations(root),
+    }) : [],
   };
 }
 
@@ -59,7 +65,11 @@ export async function analyzeSourceTree(input: {
 }): Promise<StaticAnalysisScanReport> {
   const startedAt = input.startedAt ?? Date.now();
   const discovery = await discoverSourceFiles(input.rootDir, new Set(input.options.languages));
-  const analyzedFiles = await Promise.all(discovery.files.map((sourceFile) => analyzeSourceFile(sourceFile, input.options.engines.rules)));
+  const analyzedFiles = await Promise.all(discovery.files.map((sourceFile) => analyzeSourceFile(
+    sourceFile,
+    input.options.engines.rules,
+    input.options.engines.cloneDetection,
+  )));
   const fileMetrics = analyzedFiles.map((file) => file.metrics);
   const fingerprints = analyzedFiles.map((file) => file.fingerprint);
   const findings = analyzedFiles.flatMap((file) => file.findings);
@@ -69,12 +79,15 @@ export async function analyzeSourceTree(input: {
       return [];
     })
     : [];
-  const labeledHistoricalFingerprints = historicalFingerprints.map((fingerprint) => ({
-    ...fingerprint,
-    file: `history/${fingerprint.projectKey}/${fingerprint.file}`,
-  }));
+  const labeledHistoricalFingerprints = historicalFingerprints
+    .filter((fingerprint) => fingerprint.projectKey !== input.projectKey)
+    .map((fingerprint) => ({
+      ...fingerprint,
+      file: `history/${fingerprint.projectKey}/${fingerprint.file}`,
+    }));
   const clonePairs = input.options.engines.cloneDetection
     ? [
+      ...analyzedFiles.flatMap((file) => file.internalClonePairs),
       ...detectClonePairs({
         fingerprints,
         threshold: input.options.cloneThreshold,
@@ -85,10 +98,20 @@ export async function analyzeSourceTree(input: {
         threshold: input.options.cloneThreshold,
       }),
     ]
-      .sort((a, b) => b.jaccardSimilarity - a.jaccardSimilarity || b.matchingKGrams - a.matchingKGrams)
+      .sort((a, b) => {
+        const kindOrder = (a.kind === "file" ? 0 : 1) - (b.kind === "file" ? 0 : 1);
+        return kindOrder || b.jaccardSimilarity - a.jaccardSimilarity || b.matchingKGrams - a.matchingKGrams;
+      })
       .slice(0, 50)
     : [];
   const cloneRate = calculateCloneRate({ clonePairs, fileMetrics });
+  const scoringEnabled = input.options.scoring?.enabled !== false;
+  const scoreProfile = scoringEnabled
+    ? resolveScoreProfile({
+      profileId: input.options.scoring?.profileId,
+      custom: input.options.scoring?.custom,
+    })
+    : DEFAULT_SCORE_PROFILE;
 
   await saveProjectFingerprints({
     projectKey: input.projectKey,
@@ -101,17 +124,17 @@ export async function analyzeSourceTree(input: {
     projectKey: input.projectKey,
     scannedAt: new Date().toISOString(),
     durationMs: Date.now() - startedAt,
-    metrics: aggregateProjectMetrics(fileMetrics, cloneRate),
+    metrics: aggregateProjectMetrics(fileMetrics, cloneRate, scoreProfile.metricThresholds),
     fileMetrics,
     findings,
     clonePairs,
   };
 
-  if (input.options.scoring?.enabled !== false) {
-    report.score = scoreReport(report, {
-      profileId: input.options.scoring?.profileId,
+  if (scoringEnabled) {
+    report.score = calculateScore({
+      report,
+      profile: scoreProfile,
       passScore: input.options.scoring?.passScore,
-      custom: input.options.scoring?.custom,
     });
   }
 
